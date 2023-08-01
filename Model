@@ -1,0 +1,184 @@
+rom keras.layers import Conv2D, BatchNormalization, Bidirectional, Activation, MaxPool2D, Conv2DTranspose, Concatenate, Input, ZeroPadding2D,ConvLSTM2D,LSTM,GlobalAveragePooling2D, Reshape, Dense, Multiply, AveragePooling2D, UpSampling2D
+from keras.layers import UpSampling2D, Input, Concatenate,TimeDistributed, Add, GlobalMaxPooling2D, Multiply, Permute, multiply,MaxPooling2D, MaxPooling3D, Dropout, Flatten, GlobalAveragePooling3D, GlobalMaxPooling3D
+from keras.models import Model
+from keras.callbacks import ModelCheckpoint, CSVLogger, ReduceLROnPlateau,EarlyStopping
+from keras.metrics import Recall, Precision, Accuracy, MeanIoU
+from keras import backend as K
+
+
+# SE-Nets are good source of attention mechanisms. You can check out the following links and articles to learn about them:
+# https://towardsdatascience.com/squeeze-and-excitation-networks-9ef5e71eacd7
+# https://arxiv.org/abs/1709.01507
+
+def squeeze_excite_block(inputs, ratio=16):
+    init = inputs       ## (b, 128, 128, 32)
+    channel_axis = -1
+    filters = init.shape[channel_axis]
+    se_shape = (1, 1, filters)
+
+    se = GlobalAveragePooling3D()(init)     ## (b, 32)   -> (b, 1, 1, 32)
+    se = Reshape(se_shape)(se)
+    se = Dense(filters//ratio, activation="relu", use_bias=False)(se)
+    se = Dense(filters, activation="sigmoid", use_bias=False)(se)
+
+    x = Conv2D(1, 1, padding='same', activation='sigmoid', kernel_initializer='he_normal', use_bias=False)(inputs)
+    x = BatchNormalization()(x)
+    x = Multiply()([x, se])
+    return x
+
+# Spatial attention modules are interesting for their simplicity in implementation
+# Check out the following link:
+# https://medium.com/visionwizard/understanding-attention-modules-cbam-and-bam-a-quick-read-ca8678d1c671
+# https://paperswithcode.com/method/spatial-attention-module
+
+def spatial_attention_block(inputs):
+    """
+    Spatial Attention Module utilizing the inter-spatial relationship of features.
+    """
+    kernel_size = 7
+    
+    avg_pool = K.mean(inputs, axis=-1, keepdims=True)
+    max_pool = K.max(inputs, axis=-1, keepdims=True)
+
+    x = Concatenate()([avg_pool, max_pool])
+
+    x = ConvLSTM2D(1, kernel_size, padding='same', activation='sigmoid', kernel_initializer='he_normal', use_bias=False)(x)
+
+    outputs = Multiply()([inputs, x])
+    return outputs
+
+
+def channel_attention(x, ratio=8):
+    batch, frame, _, _, channel = x.shape
+
+    ## Shared layers
+    l1 = Dense(channel//ratio, activation="relu", use_bias=False)
+    l2 = Dense(channel, use_bias=False)
+
+    ## Global Average Pooling
+    x1 = GlobalAveragePooling3D()(x)
+    x1 = l1(x1)
+    x1 = l2(x1)
+
+    ## Global Max Pooling
+    x2 = GlobalMaxPooling3D()(x)
+    x2 = l1(x2)
+    x2 = l2(x2)
+
+    ## Add both the features and pass through sigmoid
+    feats = x1 + x2
+    feats = Activation("sigmoid")(feats)
+    feats = Multiply()([x, feats])
+
+    return feats
+
+
+
+
+# Construct the Model
+# Sequential version
+
+def create_convlstm_model():
+
+    # We will use a Sequential model for model construction
+    model = Sequential()
+
+    # Define the Model Architecture.
+    ########################################################################################################################
+    #input = (SEQUENCE_LENGTH,IMAGE_HEIGHT, IMAGE_WIDTH, 3)
+    
+    model.add(ConvLSTM2D(filters = 4, kernel_size = (3, 3), activation = 'tanh',data_format = "channels_last",
+                         recurrent_dropout=0.2, return_sequences=True, input_shape = (SEQUENCE_LENGTH,
+                                                                                      IMAGE_HEIGHT, IMAGE_WIDTH, 3)))
+    
+    model.add(MaxPooling3D(pool_size=(1, 2, 2), padding='same', data_format='channels_last'))
+    model.add(TimeDistributed(Dropout(0.2)))
+    
+    
+    model.add(ConvLSTM2D(filters = 8, kernel_size = (3, 3), activation = 'tanh', data_format = "channels_last",
+                         recurrent_dropout=0.2, return_sequences=True))
+
+    model.add(MaxPooling3D(pool_size=(1, 2, 2), padding='same', data_format='channels_last'))
+    model.add(TimeDistributed(Dropout(0.2)))
+    
+    model.add(ConvLSTM2D(filters = 14, kernel_size = (3, 3), activation = 'tanh', data_format = "channels_last",
+                         recurrent_dropout=0.2, return_sequences=True))
+    
+    model.add(MaxPooling3D(pool_size=(1, 2, 2), padding='same', data_format='channels_last'))
+    model.add(TimeDistributed(Dropout(0.2)))
+    
+    model.add(ConvLSTM2D(filters = 16, kernel_size = (3, 3), activation = 'tanh', data_format = "channels_last",
+                         recurrent_dropout=0.2, return_sequences=True))
+    
+    model.add(MaxPooling3D(pool_size=(1, 2, 2), padding='same', data_format='channels_last'))
+    #model.add(TimeDistributed(Dropout(0.2)))
+    
+    
+    model.add(Flatten()) 
+    
+    model.add(Dense(len(CLASSES_LIST), activation = "softmax"))
+    
+    ########################################################################################################################
+     
+    # Display the models summary.
+    #model.summary()
+    
+    # Return the constructed convlstm model.
+    return model
+
+
+# created a functional implementation of your model exactly the way above mentioned
+# added attention on line no. 75-77
+# combined attentions together, we might want to use only one of them
+
+def create_convlstm_model_functional():
+    input = Input(shape=(SEQUENCE_LENGTH, IMAGE_HEIGHT, IMAGE_WIDTH, 3))
+    x = ConvLSTM2D(filters = 4, kernel_size = (3, 3), activation = 'tanh',data_format = "channels_last",
+                         recurrent_dropout=0.2, return_sequences=True)(input)
+    x = MaxPooling3D(pool_size=(1, 2, 2), padding='same', data_format='channels_last')(x)
+    x = TimeDistributed(Dropout(0.2))(x)
+    x = ConvLSTM2D(filters = 32, kernel_size = (3, 3), activation = 'tanh', data_format = "channels_last",
+                         recurrent_dropout=0.2, return_sequences=True)(x)
+    x = MaxPooling3D(pool_size=(1, 2, 2), padding='same', data_format='channels_last')(x)
+    x = TimeDistributed(Dropout(0.2))(x)
+    x = ConvLSTM2D(filters = 64, kernel_size = (3, 3), activation = 'tanh', data_format = "channels_last",
+                         recurrent_dropout=0.2, return_sequences=True)(x)
+    x = MaxPooling3D(pool_size=(1, 2, 2), padding='same', data_format='channels_last')(x)
+    x = TimeDistributed(Dropout(0.2))(x)
+
+    # Added attention here. however, we can set them anywhere we want.
+    # Just to demonstrate concatenated all of the attentions, we might want to use a single one and see the effects
+
+    x1 = squeeze_excite_block(x)
+    x2 = spatial_attention_block(x)
+    x3 = channel_attention(x)
+
+    x = Concatenate()([x1,x2,x3])           
+    #x = x1                                  
+    #x = x2                                   
+    #x = x3                                  
+
+    x = ConvLSTM2D(filters = 128, kernel_size = (3, 3), activation = 'tanh', data_format = "channels_last",
+                         recurrent_dropout=0.2, return_sequences=True)(x)
+    x = MaxPooling3D(pool_size=(1, 2, 2), padding='same', data_format='channels_last')(x)
+
+    x = Flatten()(x)
+    
+    outputs = Dense(len(CLASSES_LIST), activation = "softmax")(x)
+    
+    # outputs=Dense(dense_units, trainable=True, activation=activation)(attention_layer)
+    
+    model = Model(input, outputs, name="functional_convlstm_model")
+    
+    return model
+
+
+
+
+
+
+
+functional_convlstm_model = create_convlstm_model_functional()
+
+
+
