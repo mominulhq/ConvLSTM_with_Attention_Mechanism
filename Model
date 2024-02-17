@@ -1,4 +1,4 @@
-rom keras.layers import Conv2D, BatchNormalization, Bidirectional, Activation, MaxPool2D, Conv2DTranspose, Concatenate, Input, ZeroPadding2D,ConvLSTM2D,LSTM,GlobalAveragePooling2D, Reshape, Dense, Multiply, AveragePooling2D, UpSampling2D
+from keras.layers import Conv2D, BatchNormalization, Bidirectional, Activation, MaxPool2D, Conv2DTranspose, Concatenate, Input, ZeroPadding2D,ConvLSTM2D,LSTM,GlobalAveragePooling2D, Reshape, Dense, Multiply, AveragePooling2D, UpSampling2D
 from keras.layers import UpSampling2D, Input, Concatenate,TimeDistributed, Add, GlobalMaxPooling2D, Multiply, Permute, multiply,MaxPooling2D, MaxPooling3D, Dropout, Flatten, GlobalAveragePooling3D, GlobalMaxPooling3D
 from keras.models import Model
 from keras.callbacks import ModelCheckpoint, CSVLogger, ReduceLROnPlateau,EarlyStopping
@@ -128,8 +128,7 @@ def create_convlstm_model():
 
 
 # created a functional implementation of your model exactly the way above mentioned
-# added attention on line no. 75-77
-# combined attentions together, we might want to use only one of them
+# combined attentions, we might want to use only one of them
 
 def create_convlstm_model_functional():
     input = Input(shape=(SEQUENCE_LENGTH, IMAGE_HEIGHT, IMAGE_WIDTH, 3))
@@ -146,8 +145,8 @@ def create_convlstm_model_functional():
     x = MaxPooling3D(pool_size=(1, 2, 2), padding='same', data_format='channels_last')(x)
     x = TimeDistributed(Dropout(0.2))(x)
 
-    # Added attention here. however, we can set them anywhere we want.
-    # Just to demonstrate concatenated all of the attentions, we might want to use a single one and see the effects
+    # Added attention here. However, we can set them anywhere we want.
+    # to demonstrate concatenated all of the attention, we might want to use a single one and see the effects
 
     x1 = squeeze_excite_block(x)
     x2 = spatial_attention_block(x)
